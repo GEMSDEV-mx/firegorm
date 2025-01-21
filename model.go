@@ -1,7 +1,7 @@
 package firegorm
 
 import (
-	"errors"
+	"reflect"
 	"time"
 )
 
@@ -14,28 +14,29 @@ type BaseModel struct {
 	CollectionName string   `firestore:"-" json:"-"` // Not persisted in Firestore
 }
 
-// Initialize the model with a collection name.
-func (b *BaseModel) InitModel(collectionName string) {
-	b.CollectionName = collectionName
+// EnsureCollection ensures that the model has a valid collection name.
+func (b *BaseModel) EnsureCollection(model interface{}) error {
+	if b.CollectionName == "" {
+		modelName := reflect.TypeOf(model).Name()
+		info, err := GetModelInfo(modelName)
+		if err != nil {
+			return err
+		}
+		b.CollectionName = info.CollectionName
+	}
+	return nil
 }
 
-// Set ID and timestamps.
+// setID sets the ID for the model.
 func (b *BaseModel) setID(id string) {
 	b.ID = id
 }
 
+// setTimestamps sets the CreatedAt and UpdatedAt timestamps.
 func (b *BaseModel) setTimestamps() {
 	now := time.Now()
 	if b.CreatedAt.IsZero() {
 		b.CreatedAt = now
 	}
 	b.UpdatedAt = now
-}
-
-// Ensure collection name is set before any operation.
-func (b *BaseModel) ensureCollection() error {
-	if b.CollectionName == "" {
-		return errors.New("collection name is not set")
-	}
-	return nil
 }
