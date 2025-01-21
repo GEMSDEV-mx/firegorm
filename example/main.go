@@ -21,13 +21,12 @@ func main() {
 	}
 
 	// Register the Task model
-	err := firegorm.RegisterModel(&Task{}, "tasks")
+	instance, err := firegorm.RegisterModel(&Task{}, "tasks")
+	task := instance.(*Task) // Type assertion
+
 	if err != nil {
 		log.Fatalf("Failed to register model: %v", err)
 	}
-
-	task := &Task{}
-	task.SetCollectionName("tasks")
 
 	ctx := context.Background()
 

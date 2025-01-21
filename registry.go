@@ -17,15 +17,16 @@ type ModelInfo struct {
 var modelRegistry = make(map[string]ModelInfo)
 
 // RegisterModel registers a model with its collection name and schema.
-func RegisterModel(model interface{}, collectionName string) error {
+func RegisterModel(model interface{}, collectionName string) (interface{}, error) {
 	modelType := reflect.TypeOf(model)
 	if modelType.Kind() == reflect.Ptr {
 		modelType = modelType.Elem()
 	}
 
-	// Use collectionName as the key
-	if _, exists := modelRegistry[collectionName]; exists {
-		return fmt.Errorf("collection '%s' is already registered", collectionName)
+	modelName := collectionName + "." + modelType.Name()
+
+	if _, exists := modelRegistry[modelName]; exists {
+		return nil,fmt.Errorf("model '%s' is already registered", modelName)
 	}
 
 	// Build tag-to-field mapping
@@ -43,23 +44,34 @@ func RegisterModel(model interface{}, collectionName string) error {
 		}
 	}
 
-	// Store the model in the registry
-	modelRegistry[collectionName] = ModelInfo{
+	modelRegistry[modelName] = ModelInfo{
 		CollectionName: collectionName,
 		Schema:         modelType,
 		TagToFieldMap:  tagToFieldMap,
 	}
-	log.Printf("Registered model for collection '%s': %+v", collectionName, modelRegistry[collectionName])
-	return nil
+	log.Printf("Registered model '%s' with collection '%s': %+v", modelName, collectionName, modelRegistry)
+
+	// Initialize the model instance
+	instance := reflect.New(modelType).Interface()
+
+	// Set collection name and model name
+	if baseModel, ok := instance.(interface {
+		SetCollectionName(string)
+		SetModelName(string)
+	}); ok {
+		baseModel.SetCollectionName(collectionName)
+		baseModel.SetModelName(modelType.Name())
+	}
+
+	return instance, nil
 }
 
-
-// GetModelInfo retrieves metadata for a registered model by its collection name.
-func GetModelInfo(collectionName string) (ModelInfo, error) {
-	info, exists := modelRegistry[collectionName]
+// GetModelInfo retrieves metadata for a registered model.
+func GetModelInfo(modelName string) (ModelInfo, error) {
+	info, exists := modelRegistry[modelName]
 	if !exists {
-		log.Printf("Collection '%s' is not registered. Current registry: %+v", collectionName, modelRegistry)
-		return ModelInfo{}, fmt.Errorf("collection '%s' is not registered", collectionName)
+		log.Printf("Model '%s' is not registered. Current registry: %+v", modelName, modelRegistry)
+		return ModelInfo{}, fmt.Errorf("model '%s' is not registered", modelName)
 	}
 	return info, nil
 }

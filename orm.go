@@ -186,9 +186,10 @@ func (b *BaseModel) setTimestamps() {
 func validateUpdateFields(updates map[string]interface{}, baseModel *BaseModel) error {
 	// Use the CollectionName from the base model
 	collectionName := baseModel.CollectionName
+	modelName := baseModel.ModelName
 
 	// Retrieve metadata from the registry
-	modelInfo, err := GetModelInfo(collectionName)
+	modelInfo, err := GetModelInfo(collectionName + "." + modelName)
 	if err != nil {
 		return fmt.Errorf("collection '%s' is not registered", collectionName)
 	}
