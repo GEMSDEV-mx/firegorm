@@ -2,7 +2,6 @@ package firegorm
 
 import (
 	"fmt"
-	"log"
 	"reflect"
 )
 
@@ -26,7 +25,8 @@ func RegisterModel(model interface{}, collectionName string) (interface{}, error
 	modelName := collectionName + "." + modelType.Name()
 
 	if _, exists := modelRegistry[modelName]; exists {
-		return nil,fmt.Errorf("model '%s' is already registered", modelName)
+		Log(WARN, "Model '%s' is already registered", modelName)
+		return nil, fmt.Errorf("model '%s' is already registered", modelName)
 	}
 
 	// Build tag-to-field mapping
@@ -49,7 +49,7 @@ func RegisterModel(model interface{}, collectionName string) (interface{}, error
 		Schema:         modelType,
 		TagToFieldMap:  tagToFieldMap,
 	}
-	log.Printf("Registered model '%s' with collection '%s': %+v", modelName, collectionName, modelRegistry)
+	Log(INFO, "Registered model '%s' with collection '%s': %+v", modelName, collectionName, modelRegistry)
 
 	// Initialize the model instance
 	instance := reflect.New(modelType).Interface()
@@ -61,6 +61,7 @@ func RegisterModel(model interface{}, collectionName string) (interface{}, error
 	}); ok {
 		baseModel.SetCollectionName(collectionName)
 		baseModel.SetModelName(modelType.Name())
+		Log(DEBUG, "Initialized model instance with collection '%s' and name '%s'", collectionName, modelType.Name())
 	}
 
 	return instance, nil
@@ -70,8 +71,9 @@ func RegisterModel(model interface{}, collectionName string) (interface{}, error
 func GetModelInfo(modelName string) (ModelInfo, error) {
 	info, exists := modelRegistry[modelName]
 	if !exists {
-		log.Printf("Model '%s' is not registered. Current registry: %+v", modelName, modelRegistry)
+		Log(WARN, "Model '%s' is not registered. Current registry: %+v", modelName, modelRegistry)
 		return ModelInfo{}, fmt.Errorf("model '%s' is not registered", modelName)
 	}
+	Log(DEBUG, "Retrieved model info for '%s': %+v", modelName, info)
 	return info, nil
 }

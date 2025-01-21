@@ -4,15 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"reflect"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
 )
-
-// EnsureCollection ensures that the collection name is set.
 
 // ValidateStruct validates the struct fields based on tags.
 func ValidateStruct(data interface{}) error {
@@ -21,6 +18,7 @@ func ValidateStruct(data interface{}) error {
 		val = val.Elem()
 	}
 	if val.Kind() != reflect.Struct {
+		Log(ERROR, "Validation failed: data must be a struct or pointer to a struct")
 		return errors.New("data must be a struct or a pointer to a struct")
 	}
 
@@ -32,18 +30,20 @@ func ValidateStruct(data interface{}) error {
 
 		// Check for "required" tag
 		if tag == "required" && value.IsZero() {
-			return fmt.Errorf("field '%s' is required", field.Name)
+			err := fmt.Errorf("field '%s' is required", field.Name)
+			Log(ERROR, "Validation failed: %v", err)
+			return err
 		}
-
-		// Additional validation rules can be added here
 	}
 
+	Log(DEBUG, "Struct validation passed for %+v", data)
 	return nil
 }
 
 // Create inserts a new document into the model's collection.
 func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 	if err := b.EnsureCollection(); err != nil {
+		Log(ERROR, "Create failed: %v", err)
 		return err
 	}
 
@@ -53,7 +53,9 @@ func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 
 	val := reflect.ValueOf(data)
 	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Struct {
-		return fmt.Errorf("data must be a pointer to a struct")
+		err := fmt.Errorf("data must be a pointer to a struct")
+		Log(ERROR, "Create failed: %v", err)
+		return err
 	}
 
 	// Set ID and timestamps
@@ -66,7 +68,7 @@ func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 	val.FieldByName("UpdatedAt").Set(reflect.ValueOf(b.UpdatedAt))
 	val.FieldByName("Deleted").SetBool(false)
 
-	log.Printf("Creating document in collection '%s': %+v", b.CollectionName, data)
+	Log(INFO, "Creating document in collection '%s': %+v", b.CollectionName, data)
 	_, err := Client.Collection(b.CollectionName).Doc(b.ID).Set(ctx, data)
 	return err
 }
@@ -74,36 +76,41 @@ func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 // Get retrieves a document by ID and maps it to the provided model.
 func (b *BaseModel) Get(ctx context.Context, id string, model interface{}) error {
 	if err := b.EnsureCollection(); err != nil {
+		Log(ERROR, "Get failed: %v", err)
 		return err
 	}
 
 	doc, err := Client.Collection(b.CollectionName).Doc(id).Get(ctx)
 	if err != nil {
+		Log(ERROR, "Failed to fetch document with ID '%s' from collection '%s': %v", id, b.CollectionName, err)
 		return err
 	}
 
 	if err := doc.DataTo(model); err != nil {
+		Log(ERROR, "Failed to map document data to model: %v", err)
 		return err
 	}
 
-	log.Printf("Fetched document from collection '%s': %+v", b.CollectionName, model)
+	Log(INFO, "Fetched document from collection '%s': %+v", b.CollectionName, model)
 	return nil
 }
 
 // Update modifies specific fields of a document.
 func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]interface{}) error {
 	if err := b.EnsureCollection(); err != nil {
+		Log(ERROR, "Update failed: %v", err)
 		return err
 	}
 
 	// Validate updates using the registry
 	if err := validateUpdateFields(updates, b); err != nil {
+		Log(ERROR, "Update failed: %v", err)
 		return err
 	}
 
 	// Add Firestore timestamp
 	updates["updated_at"] = firestore.ServerTimestamp
-	log.Printf("Updating document ID '%s' in collection '%s' with updates: %+v", id, b.CollectionName, updates)
+	Log(INFO, "Updating document ID '%s' in collection '%s' with updates: %+v", id, b.CollectionName, updates)
 
 	_, err := Client.Collection(b.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates))
 	return err
@@ -123,6 +130,7 @@ func (b *BaseModel) Delete(ctx context.Context, id string) error {
 // List retrieves documents with optional filters and maps them to the provided results slice.
 func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, limit int, startAfter string, results interface{}) (string, error) {
 	if err := b.EnsureCollection(); err != nil {
+		Log(ERROR, "List failed: %v", err)
 		return "", err
 	}
 
@@ -134,7 +142,9 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
 	if startAfter != "" {
 		doc, err := Client.Collection(b.CollectionName).Doc(startAfter).Get(ctx)
 		if err != nil {
-			return "", fmt.Errorf("invalid startAfter token: %v", err)
+			err = fmt.Errorf("invalid startAfter token: %v", err)
+			Log(ERROR, "List failed: %v", err)
+			return "", err
 		}
 		query = query.StartAfter(doc)
 	}
@@ -145,15 +155,17 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
 	resultsVal := reflect.ValueOf(results).Elem()
 	for {
 		doc, err := iter.Next()
-		if err == iterator.Done { // Corrected iterator.Done usage
+		if err == iterator.Done {
 			break
 		}
 		if err != nil {
+			Log(ERROR, "Failed to iterate documents: %v", err)
 			return "", fmt.Errorf("failed to iterate documents: %v", err)
 		}
 
 		item := reflect.New(resultsVal.Type().Elem()).Interface()
 		if err := doc.DataTo(item); err != nil {
+			Log(ERROR, "Failed to map document data: %v", err)
 			return "", fmt.Errorf("failed to map document data: %v", err)
 		}
 
@@ -166,12 +178,13 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
 		nextPageToken = lastItem.ID
 	}
 
-	log.Printf("Listed documents from collection '%s': %+v", b.CollectionName, results)
+	Log(INFO, "Listed documents from collection '%s': %+v", b.CollectionName, results)
 	return nextPageToken, nil
 }
 
 func (b *BaseModel) setID(id string) {
 	b.ID = id
+	Log(DEBUG, "Set ID for model: %s", id)
 }
 
 func (b *BaseModel) setTimestamps() {
@@ -180,17 +193,18 @@ func (b *BaseModel) setTimestamps() {
 		b.CreatedAt = now
 	}
 	b.UpdatedAt = now
+	Log(DEBUG, "Set timestamps: CreatedAt=%v, UpdatedAt=%v", b.CreatedAt, b.UpdatedAt)
 }
 
 // validateUpdateFields validates the fields being updated based on the struct's tags.
 func validateUpdateFields(updates map[string]interface{}, baseModel *BaseModel) error {
-	// Use the CollectionName from the base model
 	collectionName := baseModel.CollectionName
 	modelName := baseModel.ModelName
 
 	// Retrieve metadata from the registry
 	modelInfo, err := GetModelInfo(collectionName + "." + modelName)
 	if err != nil {
+		Log(ERROR, "Validation failed: %v", err)
 		return fmt.Errorf("collection '%s' is not registered", collectionName)
 	}
 
@@ -198,16 +212,21 @@ func validateUpdateFields(updates map[string]interface{}, baseModel *BaseModel) 
 	for updateKey, value := range updates {
 		fieldName, exists := modelInfo.TagToFieldMap[updateKey]
 		if !exists {
-			return fmt.Errorf("field '%s' does not exist in the model for collection '%s'", updateKey, collectionName)
+			err = fmt.Errorf("field '%s' does not exist in the model for collection '%s'", updateKey, collectionName)
+			Log(ERROR, "%v", err)
+			return err
 		}
 
 		// Validate required fields
 		field, _ := modelInfo.Schema.FieldByName(fieldName)
 		validateTag := field.Tag.Get("validate")
 		if validateTag == "required" && (value == nil || (reflect.ValueOf(value).Kind() == reflect.String && value == "")) {
-			return fmt.Errorf("field '%s' is required and cannot be empty or nil", updateKey)
+			err = fmt.Errorf("field '%s' is required and cannot be empty or nil", updateKey)
+			Log(ERROR, "%v", err)
+			return err
 		}
 	}
 
+	Log(DEBUG, "Validation passed for updates: %+v", updates)
 	return nil
 }

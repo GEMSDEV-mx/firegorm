@@ -7,7 +7,9 @@ import (
 
 // Generate UUID for document IDs.
 func generateUUID() string {
-	return uuid.New().String()
+	id := uuid.New().String()
+	Log(DEBUG, "Generated UUID: %s", id)
+	return id
 }
 
 // Convert map to Firestore updates.
@@ -18,6 +20,8 @@ func updatesToFirestoreUpdates(updates map[string]interface{}) []firestore.Updat
 			Path:  key,
 			Value: value,
 		})
+		Log(DEBUG, "Added Firestore update: Path=%s, Value=%v", key, value)
 	}
+	Log(INFO, "Converted updates to Firestore format: %+v", firestoreUpdates)
 	return firestoreUpdates
 }
