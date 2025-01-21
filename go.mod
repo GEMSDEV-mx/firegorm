@@ -1,4 +1,4 @@
-module firegorm
+module github.com/GEMSDEV-mx/firegorm
 
 go 1.22.2
 
