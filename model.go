@@ -15,7 +15,7 @@ type BaseModel struct {
 }
 
 // Initialize the model with a collection name.
-func (b *BaseModel) initModel(collectionName string) {
+func (b *BaseModel) InitModel(collectionName string) {
 	b.CollectionName = collectionName
 }
 
