@@ -2,7 +2,9 @@ package firegorm
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"reflect"
 
 	"cloud.google.com/go/firestore"
@@ -31,66 +33,62 @@ func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 
 
 // Get retrieves a document by ID and maps it to the registered model schema.
-func (b *BaseModel) Get(ctx context.Context, id string, modelName string) (interface{}, error) {
-	info, err := GetModelInfo(modelName)
-	if err != nil {
-		return nil, err
+func (b *BaseModel) Get(ctx context.Context, id string, model interface{}) error {
+	if err := b.EnsureCollection(model); err != nil {
+		return err
 	}
 
-	doc, err := Client.Collection(info.CollectionName).Doc(id).Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a new instance of the model schema
-	data := reflect.New(info.Schema).Interface()
-	if err := doc.DataTo(data); err != nil {
-		return nil, err
-	}
-
-	return data, nil
-}
-
-// Update modifies specific fields of a document.
-func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]interface{}, modelName string) error {
-	info, err := GetModelInfo(modelName)
+	doc, err := Client.Collection(b.CollectionName).Doc(id).Get(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Update the timestamp
-	updates["updated_at"] = firestore.ServerTimestamp
+	// Map Firestore data to the provided model instance
+	if err := doc.DataTo(model); err != nil {
+		return err
+	}
 
-	_, err = Client.Collection(info.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates))
+	log.Printf("Fetched document from collection '%s': %+v", b.CollectionName, model)
+	return nil
+}
+
+// Update modifies specific fields of a document.
+func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]interface{}) error {
+	if b.CollectionName == "" {
+		return errors.New("collection name not set; ensure the collection is properly initialized")
+	}
+
+	updates["updated_at"] = firestore.ServerTimestamp
+	log.Printf("Updating document ID '%s' in collection '%s' with updates: %+v", id, b.CollectionName, updates)
+	_, err := Client.Collection(b.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates))
 	return err
 }
 
 
 // Delete performs a soft delete by marking the document as deleted.
-func (b *BaseModel) Delete(ctx context.Context, id string, modelName string) error {
+func (b *BaseModel) Delete(ctx context.Context, id string) error {
 	updates := map[string]interface{}{
 		"deleted":    true,
 		"updated_at": firestore.ServerTimestamp,
 	}
-	return b.Update(ctx, id, updates, modelName)
+	return b.Update(ctx, id, updates)
 }
 
 // List retrieves documents with optional filters and maps them to the registered schema.
-func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, limit int, startAfter string, modelName string) ([]interface{}, string, error) {
-	info, err := GetModelInfo(modelName)
-	if err != nil {
-		return nil, "", err
+func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, limit int, startAfter string, results interface{}) (string, error) {
+	if b.CollectionName == "" {
+		return "", errors.New("collection name not set; ensure the collection is properly initialized")
 	}
 
-	query := Client.Collection(info.CollectionName).Where("deleted", "==", false)
+	query := Client.Collection(b.CollectionName).Where("deleted", "==", false)
 	for field, value := range filters {
 		query = query.Where(field, "==", value)
 	}
 
 	if startAfter != "" {
-		doc, err := Client.Collection(info.CollectionName).Doc(startAfter).Get(ctx)
+		doc, err := Client.Collection(b.CollectionName).Doc(startAfter).Get(ctx)
 		if err != nil {
-			return nil, "", fmt.Errorf("invalid startAfter token: %v", err)
+			return "", fmt.Errorf("invalid startAfter token: %v", err)
 		}
 		query = query.StartAfter(doc)
 	}
@@ -98,31 +96,30 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
 	iter := query.Limit(limit).Documents(ctx)
 	defer iter.Stop()
 
-	var results []interface{}
-	var lastDocID string
-
+	resultsVal := reflect.ValueOf(results).Elem()
 	for {
 		doc, err := iter.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
-			return nil, "", fmt.Errorf("failed to iterate documents: %v", err)
+			return "", fmt.Errorf("failed to iterate documents: %v", err)
 		}
 
-		data := reflect.New(info.Schema).Interface()
-		if err := doc.DataTo(data); err != nil {
-			return nil, "", fmt.Errorf("failed to parse document data: %v", err)
+		item := reflect.New(resultsVal.Type().Elem()).Interface()
+		if err := doc.DataTo(item); err != nil {
+			return "", fmt.Errorf("failed to map document data: %v", err)
 		}
 
-		results = append(results, data)
-		lastDocID = doc.Ref.ID
+		resultsVal.Set(reflect.Append(resultsVal, reflect.ValueOf(item)))
 	}
 
 	nextPageToken := ""
-	if len(results) == limit {
-		nextPageToken = lastDocID
+	if resultsVal.Len() == limit {
+		lastItem := resultsVal.Index(resultsVal.Len() - 1).Interface().(*BaseModel)
+		nextPageToken = lastItem.ID
 	}
 
-	return results, nextPageToken, nil
+	log.Printf("Listed documents from collection '%s': %+v", b.CollectionName, results)
+	return nextPageToken, nil
 }

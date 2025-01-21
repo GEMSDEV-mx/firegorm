@@ -2,6 +2,7 @@ package firegorm
 
 import (
 	"errors"
+	"log"
 	"reflect"
 )
 
@@ -21,8 +22,10 @@ func RegisterModel(model interface{}, collectionName string) error {
 		modelType = modelType.Elem()
 	}
 
-	modelName := modelType.Name()
+	// Use the fully qualified name (package + type) as the model key
+	modelName := modelType.PkgPath() + "." + modelType.Name()
 	if _, exists := modelRegistry[modelName]; exists {
+		log.Printf("Model '%s' is already registered for collection '%s'.", modelName, modelRegistry[modelName].CollectionName)
 		return errors.New("model already registered: " + modelName)
 	}
 
@@ -30,6 +33,8 @@ func RegisterModel(model interface{}, collectionName string) error {
 		CollectionName: collectionName,
 		Schema:         modelType,
 	}
+
+	log.Printf("Successfully registered model '%s' with collection '%s'.", modelName, collectionName)
 	return nil
 }
 
@@ -37,6 +42,7 @@ func RegisterModel(model interface{}, collectionName string) error {
 func GetModelInfo(modelName string) (ModelInfo, error) {
 	info, exists := modelRegistry[modelName]
 	if !exists {
+		log.Printf("Model '%s' is not registered.", modelName)
 		return ModelInfo{}, errors.New("model not registered: " + modelName)
 	}
 	return info, nil
