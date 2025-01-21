@@ -6,35 +6,62 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
 )
 
+// BaseModel defines the core structure and behavior for Firestore models.
+type BaseModel struct {
+	ID            string    `firestore:"id" json:"id"`
+	CreatedAt     time.Time `firestore:"created_at" json:"created_at"`
+	UpdatedAt     time.Time `firestore:"updated_at" json:"updated_at"`
+	Deleted       bool      `firestore:"deleted" json:"deleted"`
+	CollectionName string   `firestore:"-" json:"-"` // Not persisted in Firestore
+}
+
+// SetCollectionName explicitly sets the collection name.
+func (b *BaseModel) SetCollectionName(name string) {
+	b.CollectionName = name
+}
+
+// EnsureCollection ensures that the collection name is set.
+func (b *BaseModel) EnsureCollection() error {
+	if b.CollectionName == "" {
+		return errors.New("collection name not set; ensure the model is properly initialized")
+	}
+	return nil
+}
+
 // Create inserts a new document into the model's collection.
 func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
-	if err := b.EnsureCollection(data); err != nil {
+	if err := b.EnsureCollection(); err != nil {
 		return err
+	}
+
+	val := reflect.ValueOf(data)
+	if val.Kind() != reflect.Ptr || val.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("data must be a pointer to a struct")
 	}
 
 	// Set ID and timestamps
 	b.setID(generateUUID())
 	b.setTimestamps()
 
-	// Reflectively update the incoming data with the BaseModel fields
-	val := reflect.ValueOf(data).Elem()
+	val = val.Elem()
 	val.FieldByName("ID").SetString(b.ID)
 	val.FieldByName("CreatedAt").Set(reflect.ValueOf(b.CreatedAt))
 	val.FieldByName("UpdatedAt").Set(reflect.ValueOf(b.UpdatedAt))
 
+	log.Printf("Creating document in collection '%s': %+v", b.CollectionName, data)
 	_, err := Client.Collection(b.CollectionName).Doc(b.ID).Set(ctx, data)
 	return err
 }
 
-
-// Get retrieves a document by ID and maps it to the registered model schema.
+// Get retrieves a document by ID and maps it to the provided model.
 func (b *BaseModel) Get(ctx context.Context, id string, model interface{}) error {
-	if err := b.EnsureCollection(model); err != nil {
+	if err := b.EnsureCollection(); err != nil {
 		return err
 	}
 
@@ -43,7 +70,6 @@ func (b *BaseModel) Get(ctx context.Context, id string, model interface{}) error
 		return err
 	}
 
-	// Map Firestore data to the provided model instance
 	if err := doc.DataTo(model); err != nil {
 		return err
 	}
@@ -54,8 +80,8 @@ func (b *BaseModel) Get(ctx context.Context, id string, model interface{}) error
 
 // Update modifies specific fields of a document.
 func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]interface{}) error {
-	if b.CollectionName == "" {
-		return errors.New("collection name not set; ensure the collection is properly initialized")
+	if err := b.EnsureCollection(); err != nil {
+		return err
 	}
 
 	updates["updated_at"] = firestore.ServerTimestamp
@@ -63,7 +89,6 @@ func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]in
 	_, err := Client.Collection(b.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates))
 	return err
 }
-
 
 // Delete performs a soft delete by marking the document as deleted.
 func (b *BaseModel) Delete(ctx context.Context, id string) error {
@@ -74,10 +99,10 @@ func (b *BaseModel) Delete(ctx context.Context, id string) error {
 	return b.Update(ctx, id, updates)
 }
 
-// List retrieves documents with optional filters and maps them to the registered schema.
+// List retrieves documents with optional filters and maps them to the provided results slice.
 func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, limit int, startAfter string, results interface{}) (string, error) {
-	if b.CollectionName == "" {
-		return "", errors.New("collection name not set; ensure the collection is properly initialized")
+	if err := b.EnsureCollection(); err != nil {
+		return "", err
 	}
 
 	query := Client.Collection(b.CollectionName).Where("deleted", "==", false)
@@ -99,7 +124,7 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
 	resultsVal := reflect.ValueOf(results).Elem()
 	for {
 		doc, err := iter.Next()
-		if err == iterator.Done {
+		if err == iterator.Done { // Corrected iterator.Done usage
 			break
 		}
 		if err != nil {
@@ -122,4 +147,16 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
 
 	log.Printf("Listed documents from collection '%s': %+v", b.CollectionName, results)
 	return nextPageToken, nil
+}
+
+func (b *BaseModel) setID(id string) {
+	b.ID = id
+}
+
+func (b *BaseModel) setTimestamps() {
+	now := time.Now()
+	if b.CreatedAt.IsZero() {
+		b.CreatedAt = now
+	}
+	b.UpdatedAt = now
 }
