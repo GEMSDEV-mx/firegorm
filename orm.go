@@ -12,31 +12,42 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-// BaseModel defines the core structure and behavior for Firestore models.
-type BaseModel struct {
-	ID            string    `firestore:"id" json:"id"`
-	CreatedAt     time.Time `firestore:"created_at" json:"created_at"`
-	UpdatedAt     time.Time `firestore:"updated_at" json:"updated_at"`
-	Deleted       bool      `firestore:"deleted" json:"deleted"`
-	CollectionName string   `firestore:"-" json:"-"` // Not persisted in Firestore
-}
-
-// SetCollectionName explicitly sets the collection name.
-func (b *BaseModel) SetCollectionName(name string) {
-	b.CollectionName = name
-}
-
 // EnsureCollection ensures that the collection name is set.
-func (b *BaseModel) EnsureCollection() error {
-	if b.CollectionName == "" {
-		return errors.New("collection name not set; ensure the model is properly initialized")
+
+// ValidateStruct validates the struct fields based on tags.
+func ValidateStruct(data interface{}) error {
+	val := reflect.ValueOf(data)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
 	}
+	if val.Kind() != reflect.Struct {
+		return errors.New("data must be a struct or a pointer to a struct")
+	}
+
+	t := val.Type()
+	for i := 0; i < val.NumField(); i++ {
+		field := t.Field(i)
+		tag := field.Tag.Get("validate")
+		value := val.Field(i)
+
+		// Check for "required" tag
+		if tag == "required" && value.IsZero() {
+			return fmt.Errorf("field '%s' is required", field.Name)
+		}
+
+		// Additional validation rules can be added here
+	}
+
 	return nil
 }
 
 // Create inserts a new document into the model's collection.
 func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 	if err := b.EnsureCollection(); err != nil {
+		return err
+	}
+
+	if err := ValidateStruct(data); err != nil {
 		return err
 	}
 
@@ -53,6 +64,7 @@ func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 	val.FieldByName("ID").SetString(b.ID)
 	val.FieldByName("CreatedAt").Set(reflect.ValueOf(b.CreatedAt))
 	val.FieldByName("UpdatedAt").Set(reflect.ValueOf(b.UpdatedAt))
+	val.FieldByName("Deleted").SetBool(false)
 
 	log.Printf("Creating document in collection '%s': %+v", b.CollectionName, data)
 	_, err := Client.Collection(b.CollectionName).Doc(b.ID).Set(ctx, data)
@@ -84,16 +96,25 @@ func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]in
 		return err
 	}
 
+	// Validate updates using the registry
+	if err := validateUpdateFields(updates, b); err != nil {
+		return err
+	}
+
+	// Add Firestore timestamp
 	updates["updated_at"] = firestore.ServerTimestamp
 	log.Printf("Updating document ID '%s' in collection '%s' with updates: %+v", id, b.CollectionName, updates)
+
 	_, err := Client.Collection(b.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates))
 	return err
 }
 
 // Delete performs a soft delete by marking the document as deleted.
 func (b *BaseModel) Delete(ctx context.Context, id string) error {
+	now := time.Now()
 	updates := map[string]interface{}{
 		"deleted":    true,
+		"deleted_at": now,
 		"updated_at": firestore.ServerTimestamp,
 	}
 	return b.Update(ctx, id, updates)
@@ -159,4 +180,33 @@ func (b *BaseModel) setTimestamps() {
 		b.CreatedAt = now
 	}
 	b.UpdatedAt = now
+}
+
+// validateUpdateFields validates the fields being updated based on the struct's tags.
+func validateUpdateFields(updates map[string]interface{}, baseModel *BaseModel) error {
+	// Use the CollectionName from the base model
+	collectionName := baseModel.CollectionName
+
+	// Retrieve metadata from the registry
+	modelInfo, err := GetModelInfo(collectionName)
+	if err != nil {
+		return fmt.Errorf("collection '%s' is not registered", collectionName)
+	}
+
+	// Validate updates using the tag-to-field map
+	for updateKey, value := range updates {
+		fieldName, exists := modelInfo.TagToFieldMap[updateKey]
+		if !exists {
+			return fmt.Errorf("field '%s' does not exist in the model for collection '%s'", updateKey, collectionName)
+		}
+
+		// Validate required fields
+		field, _ := modelInfo.Schema.FieldByName(fieldName)
+		validateTag := field.Tag.Get("validate")
+		if validateTag == "required" && (value == nil || (reflect.ValueOf(value).Kind() == reflect.String && value == "")) {
+			return fmt.Errorf("field '%s' is required and cannot be empty or nil", updateKey)
+		}
+	}
+
+	return nil
 }
