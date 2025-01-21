@@ -1,3 +1,7 @@
+<div style="text-align: center;">
+  <img src="./logo.png" alt="Firegorm Logo" width="200"/>
+</div>
+
 # Firegorm: A Firestore ORM for Go
 
 Firegorm is a lightweight Object-Relational Mapping (ORM) library designed to simplify interactions with Google Firestore in Go projects. It provides a structured approach for managing Firestore collections and documents with features such as validation, logging, and query handling.
