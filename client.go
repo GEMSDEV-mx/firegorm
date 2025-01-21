@@ -2,8 +2,6 @@ package firegorm
 
 import (
 	"context"
-	"log"
-	"os"
 
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
@@ -12,17 +10,21 @@ import (
 
 var Client *firestore.Client
 
-// Init initializes the Firestore client.
-func Init() {
+// Init initializes the Firestore client with the given credentials.
+// The credentials should be passed as a JSON string.
+func Init(credentialsJSON string) error {
 	ctx := context.Background()
-	sa := option.WithCredentialsJSON([]byte(os.Getenv("FIREBASE_SERVICE_ACCOUNT_KEY")))
+	sa := option.WithCredentialsJSON([]byte(credentialsJSON))
+
 	app, err := firebase.NewApp(ctx, nil, sa)
 	if err != nil {
-		log.Fatalf("Error initializing Firebase app: %v", err)
+		return err // Return error instead of logging and exiting
 	}
 
 	Client, err = app.Firestore(ctx)
 	if err != nil {
-		log.Fatalf("Error initializing Firestore client: %v", err)
+		return err // Return error instead of logging and exiting
 	}
+
+	return nil
 }
