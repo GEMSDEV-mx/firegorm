@@ -129,58 +129,67 @@ func (b *BaseModel) Delete(ctx context.Context, id string) error {
 
 // List retrieves documents with optional filters and maps them to the provided results slice.
 func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, limit int, startAfter string, results interface{}) (string, error) {
-	if err := b.EnsureCollection(); err != nil {
-		Log(ERROR, "List failed: %v", err)
-		return "", err
-	}
+    if err := b.EnsureCollection(); err != nil {
+        Log(ERROR, "List failed: %v", err)
+        return "", err
+    }
 
-	query := Client.Collection(b.CollectionName).Where("deleted", "==", false)
-	for field, value := range filters {
-		query = query.Where(field, "==", value)
-	}
+    query := Client.Collection(b.CollectionName).Where("deleted", "==", false)
+    for field, value := range filters {
+        query = query.Where(field, "==", value)
+    }
 
-	if startAfter != "" {
-		doc, err := Client.Collection(b.CollectionName).Doc(startAfter).Get(ctx)
-		if err != nil {
-			err = fmt.Errorf("invalid startAfter token: %v", err)
-			Log(ERROR, "List failed: %v", err)
-			return "", err
-		}
-		query = query.StartAfter(doc)
-	}
+    if startAfter != "" {
+        doc, err := Client.Collection(b.CollectionName).Doc(startAfter).Get(ctx)
+        if err != nil {
+            err = fmt.Errorf("invalid startAfter token: %v", err)
+            Log(ERROR, "List failed: %v", err)
+            return "", err
+        }
+        query = query.StartAfter(doc)
+    }
 
-	iter := query.Limit(limit).Documents(ctx)
-	defer iter.Stop()
+    iter := query.Limit(limit).Documents(ctx)
+    defer iter.Stop()
 
-	resultsVal := reflect.ValueOf(results).Elem()
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			Log(ERROR, "Failed to iterate documents: %v", err)
-			return "", fmt.Errorf("failed to iterate documents: %v", err)
-		}
+    resultsVal := reflect.ValueOf(results).Elem()
+    itemType := resultsVal.Type().Elem()
 
-		item := reflect.New(resultsVal.Type().Elem()).Interface()
-		if err := doc.DataTo(item); err != nil {
-			Log(ERROR, "Failed to map document data: %v", err)
-			return "", fmt.Errorf("failed to map document data: %v", err)
-		}
+    for {
+        doc, err := iter.Next()
+        if err == iterator.Done {
+            break
+        }
+        if err != nil {
+            Log(ERROR, "Failed to iterate documents: %v", err)
+            return "", fmt.Errorf("failed to iterate documents: %v", err)
+        }
 
-		resultsVal.Set(reflect.Append(resultsVal, reflect.ValueOf(item)))
-	}
+        // Create a new item and map Firestore document data to it
+        item := reflect.New(itemType).Interface()
+        if err := doc.DataTo(item); err != nil {
+            Log(ERROR, "Failed to map document data: %v", err)
+            return "", fmt.Errorf("failed to map document data: %v", err)
+        }
 
-	nextPageToken := ""
-	if resultsVal.Len() == limit {
-		lastItem := resultsVal.Index(resultsVal.Len() - 1).Interface().(*BaseModel)
-		nextPageToken = lastItem.ID
-	}
+        // If the slice holds non-pointer values, dereference the item before appending
+        if itemType.Kind() != reflect.Ptr {
+            item = reflect.ValueOf(item).Elem().Interface()
+        }
 
-	Log(INFO, "Listed documents from collection '%s': %+v", b.CollectionName, results)
-	return nextPageToken, nil
+        resultsVal.Set(reflect.Append(resultsVal, reflect.ValueOf(item)))
+    }
+
+    nextPageToken := ""
+    if resultsVal.Len() == limit {
+        lastItem := resultsVal.Index(resultsVal.Len() - 1).Interface()
+        nextPageToken = reflect.ValueOf(lastItem).FieldByName("ID").String()
+    }
+
+    Log(INFO, "Listed documents from collection '%s': %+v", b.CollectionName, results)
+    return nextPageToken, nil
 }
+
 
 func (b *BaseModel) setID(id string) {
 	b.ID = id

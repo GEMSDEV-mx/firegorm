@@ -48,6 +48,33 @@ func main() {
 	}
 	log.Printf("Fetched Task: %+v", fetchedTask)
 
+
+	// Test listing tasks
+	log.Println("Listing tasks...")
+	var tasks []Task
+	filters := map[string]interface{}{
+		"done": false, // List only tasks where "done" is false
+	}
+	limit := 10
+	startAfter := ""
+
+	nextPageToken, err := task.List(ctx, filters, limit, startAfter, &tasks)
+	if err != nil {
+		log.Fatalf("Failed to list tasks: %v", err)
+	}
+
+	log.Printf("Listed tasks: %+v", tasks)
+	log.Printf("Next page token: %s", nextPageToken)
+
+	// Validate listing results
+	if len(tasks) == 0 {
+		log.Println("No tasks found matching the filters.")
+	} else {
+		for _, t := range tasks {
+			log.Printf("Task ID: %s, Title: %s, Done: %v", t.ID, t.Title, t.Done)
+		}
+	}
+
 	// Valid Update
 	updates := map[string]interface{}{
 		"title":       "New Title",
