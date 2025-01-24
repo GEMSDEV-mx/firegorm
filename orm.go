@@ -217,8 +217,20 @@ func validateUpdateFields(updates map[string]interface{}, baseModel *BaseModel) 
 		return fmt.Errorf("collection '%s' is not registered", collectionName)
 	}
 
-	// Validate updates using the tag-to-field map
+	// Include BaseModel fields explicitly
+	baseModelFields := map[string]bool{
+		"deleted":    true,
+		"deleted_at": true,
+		"updated_at": true,
+	}
+
+	// Validate updates
 	for updateKey, value := range updates {
+		if baseModelFields[updateKey] {
+			// Allow BaseModel fields
+			continue
+		}
+
 		fieldName, exists := modelInfo.TagToFieldMap[updateKey]
 		if !exists {
 			err = fmt.Errorf("field '%s' does not exist in the model for collection '%s'", updateKey, collectionName)
