@@ -95,6 +95,42 @@ func (b *BaseModel) Get(ctx context.Context, id string, model interface{}) error
 	return nil
 }
 
+// FindOneBy retrieves a single document from the collection that matches the given property and value.
+func (b *BaseModel) FindOneBy(ctx context.Context, property string, value interface{}, model interface{}) error {
+	if err := b.EnsureCollection(); err != nil {
+		Log(ERROR, "FindOneBy failed: %v", err)
+		return err
+	}
+
+	// Build the query: only non-deleted documents are considered.
+	query := Client.Collection(b.CollectionName).
+		Where(property, "==", value).
+		Where("deleted", "==", false).
+		Limit(1)
+
+	iter := query.Documents(ctx)
+	defer iter.Stop()
+
+	doc, err := iter.Next()
+	if err == iterator.Done {
+		err = fmt.Errorf("no document found for %s == %v", property, value)
+		Log(WARN, "FindOneBy: %v", err)
+		return err
+	}
+	if err != nil {
+		Log(ERROR, "Error executing query in FindOneBy: %v", err)
+		return err
+	}
+
+	if err := doc.DataTo(model); err != nil {
+		Log(ERROR, "Failed to map document data to model in FindOneBy: %v", err)
+		return err
+	}
+
+	Log(INFO, "Found document by %s == %v in collection '%s': %+v", property, value, b.CollectionName, model)
+	return nil
+}
+
 // Update modifies specific fields of a document.
 func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]interface{}) error {
 	if err := b.EnsureCollection(); err != nil {
