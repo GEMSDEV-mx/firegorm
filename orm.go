@@ -190,6 +190,39 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
     return nextPageToken, nil
 }
 
+func (b *BaseModel) Last(ctx context.Context, model interface{}) error {
+    if err := b.EnsureCollection(); err != nil {
+        Log(ERROR, "Last failed: %v", err)
+        return err
+    }
+
+    // Query for documents that are not deleted, ordered by creation time descending.
+    query := Client.Collection(b.CollectionName).
+        Where("deleted", "==", false).
+        OrderBy("created_at", firestore.Desc).
+        Limit(1)
+
+    iter := query.Documents(ctx)
+    defer iter.Stop()
+
+    doc, err := iter.Next()
+    if err == iterator.Done {
+        Log(WARN, "No records found in collection '%s'", b.CollectionName)
+        return errors.New("no records found")
+    }
+    if err != nil {
+        Log(ERROR, "Error fetching last record: %v", err)
+        return err
+    }
+
+    if err := doc.DataTo(model); err != nil {
+        Log(ERROR, "Error mapping document data to model: %v", err)
+        return err
+    }
+
+    Log(INFO, "Fetched last record from collection '%s': %+v", b.CollectionName, model)
+    return nil
+}
 
 func (b *BaseModel) setID(id string) {
 	b.ID = id
