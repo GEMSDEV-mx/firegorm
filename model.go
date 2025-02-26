@@ -11,7 +11,7 @@ type BaseModel struct {
 	CreatedAt      time.Time  `firestore:"created_at" json:"created_at"`
 	UpdatedAt      *time.Time `firestore:"updated_at" json:"updated_at"` // Changed to pointer
 	Deleted        bool       `firestore:"deleted" json:"deleted"`
-	DeletedAt      *time.Time `firestore:"deleted_at,omitempty" json:"deleted_at,omitempty"`
+	DeletedAt     *time.Time `firestore:"deleted_at" json:"deleted_at"`
 	CollectionName string     `firestore:"-" json:"-"` // Not persisted in Firestore
 	ModelName      string     `firestore:"-" json:"-"` // Not persisted in Firestore
 }
