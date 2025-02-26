@@ -66,6 +66,7 @@ func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 	val.FieldByName("ID").SetString(b.ID)
 	val.FieldByName("CreatedAt").Set(reflect.ValueOf(b.CreatedAt))
 	val.FieldByName("UpdatedAt").Set(reflect.ValueOf(b.UpdatedAt))
+	val.FieldByName("DeletedAt").Set(reflect.ValueOf(b.DeletedAt))
 	val.FieldByName("Deleted").SetBool(false)
 
 	Log(INFO, "Creating document in collection '%s': %+v", b.CollectionName, data)
