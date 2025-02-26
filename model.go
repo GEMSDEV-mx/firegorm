@@ -7,13 +7,13 @@ import (
 
 // BaseModel defines the core structure and behavior for Firestore models.
 type BaseModel struct {
-	ID            string     `firestore:"id" json:"id"`
-	CreatedAt     time.Time  `firestore:"created_at" json:"created_at"`
-	UpdatedAt     time.Time  `firestore:"updated_at" json:"updated_at"`
-	Deleted       bool       `firestore:"deleted" json:"deleted"`
-	DeletedAt     *time.Time `firestore:"deleted_at,omitempty" json:"deleted_at,omitempty"`
-	CollectionName string    `firestore:"-" json:"-"` // Not persisted in Firestore
-	ModelName      string    `firestore:"-" json:"-"` // Not persisted in Firestore
+	ID             string     `firestore:"id" json:"id"`
+	CreatedAt      time.Time  `firestore:"created_at" json:"created_at"`
+	UpdatedAt      *time.Time `firestore:"updated_at" json:"updated_at"` // Changed to pointer
+	Deleted        bool       `firestore:"deleted" json:"deleted"`
+	DeletedAt      *time.Time `firestore:"deleted_at,omitempty" json:"deleted_at,omitempty"`
+	CollectionName string     `firestore:"-" json:"-"` // Not persisted in Firestore
+	ModelName      string     `firestore:"-" json:"-"` // Not persisted in Firestore
 }
 
 // SetCollectionName explicitly sets the collection name.

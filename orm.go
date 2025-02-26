@@ -270,9 +270,12 @@ func (b *BaseModel) setTimestamps() {
 	if b.CreatedAt.IsZero() {
 		b.CreatedAt = now
 	}
-	b.UpdatedAt = now
+	// Leave UpdatedAt as nil on creation.
+	b.UpdatedAt = &now
+	b.DeletedAt = nil
 	Log(DEBUG, "Set timestamps: CreatedAt=%v, UpdatedAt=%v", b.CreatedAt, b.UpdatedAt)
 }
+
 
 // validateUpdateFields validates the fields being updated based on the struct's tags.
 func validateUpdateFields(updates map[string]interface{}, baseModel *BaseModel) error {
