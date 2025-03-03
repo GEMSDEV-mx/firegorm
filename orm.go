@@ -186,7 +186,12 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
         query = query.StartAfter(doc)
     }
 
-    iter := query.Limit(limit).Documents(ctx)
+    // Only apply limit if it's greater than zero.
+    if limit > 0 {
+        query = query.Limit(limit)
+    }
+
+    iter := query.Documents(ctx)
     defer iter.Stop()
 
     resultsVal := reflect.ValueOf(results).Elem()
@@ -218,7 +223,8 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
     }
 
     nextPageToken := ""
-    if resultsVal.Len() == limit {
+    // Only set nextPageToken if a limit was applied.
+    if limit > 0 && resultsVal.Len() == limit {
         lastItem := resultsVal.Index(resultsVal.Len() - 1).Interface()
         nextPageToken = reflect.ValueOf(lastItem).FieldByName("ID").String()
     }
