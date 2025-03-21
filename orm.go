@@ -132,6 +132,44 @@ func (b *BaseModel) FindOneBy(ctx context.Context, property string, value interf
 	return nil
 }
 
+// FindOne retrieves a single document from the collection that matches the given filters.
+func (b *BaseModel) FindOne(ctx context.Context, filters map[string]interface{}, model interface{}) error {
+	if err := b.EnsureCollection(); err != nil {
+		Log(ERROR, "FindOne failed: %v", err)
+		return err
+	}
+
+	// Start with a query that excludes deleted documents.
+	query := Client.Collection(b.CollectionName).Where("deleted", "==", false)
+	// Apply each filter in the provided map.
+	for field, value := range filters {
+		query = query.Where(field, "==", value)
+	}
+	query = query.Limit(1)
+
+	iter := query.Documents(ctx)
+	defer iter.Stop()
+
+	doc, err := iter.Next()
+	if err == iterator.Done {
+		err = fmt.Errorf("no document found matching filters: %v", filters)
+		Log(WARN, "FindOne: %v", err)
+		return err
+	}
+	if err != nil {
+		Log(ERROR, "Error executing query in FindOne: %v", err)
+		return err
+	}
+
+	if err := doc.DataTo(model); err != nil {
+		Log(ERROR, "Failed to map document data to model in FindOne: %v", err)
+		return err
+	}
+
+	Log(INFO, "Found document with filters %v in collection '%s': %+v", filters, b.CollectionName, model)
+	return nil
+}
+
 // Update modifies specific fields of a document.
 func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]interface{}) error {
 	if err := b.EnsureCollection(); err != nil {
