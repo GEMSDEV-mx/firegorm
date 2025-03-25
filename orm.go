@@ -305,6 +305,40 @@ func (b *BaseModel) Last(ctx context.Context, model interface{}) error {
     return nil
 }
 
+// Count retrieves the number of documents in the collection that match the provided filters.
+func (b *BaseModel) Count(ctx context.Context, filters map[string]interface{}) (int, error) {
+    if err := b.EnsureCollection(); err != nil {
+        Log(ERROR, "Count failed: %v", err)
+        return 0, err
+    }
+
+    // Build the query: only count documents that are not deleted.
+    query := Client.Collection(b.CollectionName).Where("deleted", "==", false)
+    for field, value := range filters {
+        query = query.Where(field, "==", value)
+    }
+
+    iter := query.Documents(ctx)
+    defer iter.Stop()
+
+    count := 0
+    for {
+        _, err := iter.Next()
+        if err == iterator.Done {
+            break
+        }
+        if err != nil {
+            Log(ERROR, "Error iterating documents for count: %v", err)
+            return 0, err
+        }
+        count++
+    }
+
+    Log(INFO, "Counted %d documents in collection '%s' with filters: %v", count, b.CollectionName, filters)
+    return count, nil
+}
+
+
 func (b *BaseModel) setID(id string) {
 	b.ID = id
 	Log(DEBUG, "Set ID for model: %s", id)

@@ -31,7 +31,7 @@ func main() {
 
 	ctx := context.Background()
 
-	// Create multiple tasks to test pagination (e.g., 15 tasks)
+	// Create multiple tasks (e.g., 15 tasks)
 	totalTasks := 15
 	for i := 1; i <= totalTasks; i++ {
 		taskData := &Task{
@@ -45,15 +45,21 @@ func main() {
 		log.Printf("Created Task %d with ID: %s", i, taskData.ID)
 	}
 
+	// Test the Count method for tasks that are not done.
+	filters := map[string]interface{}{
+		"done": false,
+	}
+	count, err := taskModel.Count(ctx, filters)
+	if err != nil {
+		log.Fatalf("Failed to count tasks: %v", err)
+	}
+	log.Printf("Counted %d tasks matching filters: %v", count, filters)
+
 	// Test listing tasks with pagination
 	log.Println("Testing pagination for listing tasks...")
 	var allTasks []Task
 	limit := 10
 	startAfter := ""
-	filters := map[string]interface{}{
-		"done": false, // only list tasks that are not done
-	}
-
 	page := 1
 	for {
 		var tasksPage []Task
