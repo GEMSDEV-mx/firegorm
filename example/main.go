@@ -22,7 +22,7 @@ func main() {
 		log.Fatalf("Failed to initialize Firegorm: %v", err)
 	}
 
-	// Register the Task model
+	// Register the Task model.
 	instance, err := firegorm.RegisterModel(&Task{}, "tasks")
 	if err != nil {
 		log.Fatalf("Failed to register model: %v", err)
@@ -55,15 +55,19 @@ func main() {
 	}
 	log.Printf("Counted %d tasks matching filters: %v", count, filters)
 
-	// Test listing tasks with pagination
+	// Test listing tasks with pagination and sorting.
 	log.Println("Testing pagination for listing tasks...")
 	var allTasks []Task
 	limit := 10
 	startAfter := ""
 	page := 1
+	// For example, sort by "created_at" in descending order.
+	sortField := "created_at"
+	sortOrder := "desc"
+
 	for {
 		var tasksPage []Task
-		nextPageToken, err := taskModel.List(ctx, filters, limit, startAfter, &tasksPage)
+		nextPageToken, err := taskModel.List(ctx, filters, limit, startAfter, sortField, sortOrder, &tasksPage)
 		if err != nil {
 			log.Fatalf("Failed to list tasks on page %d: %v", page, err)
 		}

@@ -202,18 +202,33 @@ func (b *BaseModel) Delete(ctx context.Context, id string) error {
 	return b.Update(ctx, id, updates)
 }
 
-// List retrieves documents with optional filters and maps them to the provided results slice.
-func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, limit int, startAfter string, results interface{}) (string, error) {
+// List retrieves documents with optional filters, sorting, and pagination.
+func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, limit int, startAfter string, sortField string, sortOrder string, results interface{}) (string, error) {
     if err := b.EnsureCollection(); err != nil {
         Log(ERROR, "List failed: %v", err)
         return "", err
     }
 
+    // Start with the query: only non-deleted documents.
     query := Client.Collection(b.CollectionName).Where("deleted", "==", false)
     for field, value := range filters {
         query = query.Where(field, "==", value)
     }
 
+    // Apply sorting if sortField is provided.
+    if sortField != "" {
+        if sortOrder == "asc" {
+            query = query.OrderBy(sortField, firestore.Asc)
+        } else if sortOrder == "desc" {
+            query = query.OrderBy(sortField, firestore.Desc)
+        } else {
+            err := fmt.Errorf("invalid sortOrder: %s. Must be 'asc' or 'desc'", sortOrder)
+            Log(ERROR, "List failed: %v", err)
+            return "", err
+        }
+    }
+
+    // If a startAfter token is provided, use it for pagination.
     if startAfter != "" {
         doc, err := Client.Collection(b.CollectionName).Doc(startAfter).Get(ctx)
         if err != nil {
@@ -245,14 +260,14 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
             return "", fmt.Errorf("failed to iterate documents: %v", err)
         }
 
-        // Create a new item and map Firestore document data to it
+        // Create a new item and map Firestore document data to it.
         item := reflect.New(itemType).Interface()
         if err := doc.DataTo(item); err != nil {
             Log(ERROR, "Failed to map document data: %v", err)
             return "", fmt.Errorf("failed to map document data: %v", err)
         }
 
-        // If the slice holds non-pointer values, dereference the item before appending
+        // If the slice holds non-pointer values, dereference the item before appending.
         if itemType.Kind() != reflect.Ptr {
             item = reflect.ValueOf(item).Elem().Interface()
         }
