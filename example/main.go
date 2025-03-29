@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/GEMSDEV-mx/firegorm"
 )
@@ -89,4 +90,23 @@ func main() {
 	}
 
 	log.Printf("Total tasks retrieved via pagination: %d", len(allTasks))
+
+	// -------------------------------
+	// New: Test filtering by created_at date using operator notation.
+	// -------------------------------
+	log.Println("Testing date filtering with created_at__gte filter...")
+	// Get today's date in the format "2006-01-02"
+	todayStr := time.Now().Format("2006-01-02")
+	dateFilters := map[string]interface{}{
+		"created_at__gte": todayStr,
+	}
+	var dateFilteredTasks []Task
+	_, err = taskModel.List(ctx, dateFilters, 20, "", "created_at", "desc", &dateFilteredTasks)
+	if err != nil {
+		log.Fatalf("Failed to list tasks by date filter: %v", err)
+	}
+	log.Printf("Retrieved %d tasks with created_at >= %s", len(dateFilteredTasks), todayStr)
+	for _, t := range dateFilteredTasks {
+		log.Printf("Task ID: %s, Title: %s, CreatedAt: %v", t.ID, t.Title, t.CreatedAt)
+	}
 }

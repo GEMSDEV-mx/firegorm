@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -211,8 +212,13 @@ func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, li
 
     // Start with the query: only non-deleted documents.
     query := Client.Collection(b.CollectionName).Where("deleted", "==", false)
-    for field, value := range filters {
-        query = query.Where(field, "==", value)
+    
+    // Apply operator filters (supports __gt, __gte, __lt, __lte for any field, including custom date fields)
+    var err error
+    query, err = applyOperatorFilters(query, filters)
+    if err != nil {
+        Log(ERROR, "List failed when applying filters: %v", err)
+        return "", err
     }
 
     // Apply sorting if sortField is provided.
@@ -416,4 +422,52 @@ func validateUpdateFields(updates map[string]interface{}, baseModel *BaseModel) 
 
 	Log(DEBUG, "Validation passed for updates: %+v", updates)
 	return nil
+}
+
+// applyOperatorFilters applies filters that use an operator notation (e.g., "__gt", "__lte").
+// If a filter value is a string, it attempts to parse it as a date using the "2006-01-02" layout.
+func applyOperatorFilters(query firestore.Query, filters map[string]interface{}) (firestore.Query, error) {
+    for key, value := range filters {
+        field, op, newValue, err := parseFilter(key, value)
+        if err != nil {
+            return query, err
+        }
+        query = query.Where(field, op, newValue)
+    }
+    return query, nil
+}
+
+// We extract the operator parsing logic from applyOperatorFilters into a helper function.
+func parseFilter(key string, value interface{}) (field string, op string, newValue interface{}, err error) {
+	if strings.Contains(key, "__") {
+		parts := strings.SplitN(key, "__", 2)
+		field = parts[0]
+		switch parts[1] {
+		case "gt":
+			op = ">"
+		case "gte":
+			op = ">="
+		case "lt":
+			op = "<"
+		case "lte":
+			op = "<="
+		default:
+			op = "=="
+		}
+		// If the value is a string, attempt to parse it as a date.
+		if dateStr, ok := value.(string); ok {
+			parsedDate, err := time.Parse("2006-01-02", dateStr)
+			if err != nil {
+				return "", "", nil, fmt.Errorf("invalid date format for %s: %v", key, err)
+			}
+			newValue = parsedDate
+		} else {
+			newValue = value
+		}
+	} else {
+		field = key
+		op = "=="
+		newValue = value
+	}
+	return field, op, newValue, nil
 }
