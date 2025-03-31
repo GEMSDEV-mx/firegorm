@@ -447,37 +447,56 @@ func applyOperatorFilters(query firestore.Query, filters map[string]interface{})
     return query, nil
 }
 
-// We extract the operator parsing logic from applyOperatorFilters into a helper function.
+// parseFilter extracts the field name, operator, and new value from a filter key/value.
+// If no operator suffix is provided and the value is a slice, it sets the operator to "in".
 func parseFilter(key string, value interface{}) (field string, op string, newValue interface{}, err error) {
-	if strings.Contains(key, "__") {
-		parts := strings.SplitN(key, "__", 2)
-		field = parts[0]
-		switch parts[1] {
-		case "gt":
-			op = ">"
-		case "gte":
-			op = ">="
-		case "lt":
-			op = "<"
-		case "lte":
-			op = "<="
-		default:
-			op = "=="
-		}
-		// If the value is a string, attempt to parse it as a date.
-		if dateStr, ok := value.(string); ok {
-			parsedDate, err := time.Parse("2006-01-02", dateStr)
-			if err != nil {
-				return "", "", nil, fmt.Errorf("invalid date format for %s: %v", key, err)
-			}
-			newValue = parsedDate
-		} else {
-			newValue = value
-		}
-	} else {
-		field = key
-		op = "=="
-		newValue = value
-	}
-	return field, op, newValue, nil
+    // Simple filter case: no "__" in key.
+    if !strings.Contains(key, "__") {
+        field = key
+        v := reflect.ValueOf(value)
+        if v.Kind() == reflect.Slice {
+            op = "in"
+            newValue = value
+            return field, op, newValue, nil
+        }
+        op = "=="
+        // For simple filters, try date parsing but do not return error if it fails.
+        if dateStr, ok := value.(string); ok {
+            if parsedDate, err := time.Parse("2006-01-02", dateStr); err == nil {
+                newValue = parsedDate
+            } else {
+                newValue = value
+            }
+        } else {
+            newValue = value
+        }
+        return field, op, newValue, nil
+    }
+
+    // Operator filter case: key contains "__".
+    parts := strings.SplitN(key, "__", 2)
+    field = parts[0]
+    switch parts[1] {
+    case "gt":
+        op = ">"
+    case "gte":
+        op = ">="
+    case "lt":
+        op = "<"
+    case "lte":
+        op = "<="
+    default:
+        op = "=="
+    }
+    // For operator filters, if the value is a string, try to parse it as a date.
+    if dateStr, ok := value.(string); ok {
+        parsedDate, err := time.Parse("2006-01-02", dateStr)
+        if err != nil {
+            return "", "", nil, fmt.Errorf("invalid date format for %s: %v", key, err)
+        }
+        newValue = parsedDate
+    } else {
+        newValue = value
+    }
+    return field, op, newValue, nil
 }
