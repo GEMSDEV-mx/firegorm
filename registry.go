@@ -3,6 +3,7 @@ package firegorm
 import (
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 // ModelInfo stores metadata for registered models.
@@ -30,19 +31,28 @@ func RegisterModel(model interface{}, collectionName string) (interface{}, error
 	}
 
 	// Build tag-to-field mapping
-	tagToFieldMap := make(map[string]string)
-	for i := 0; i < modelType.NumField(); i++ {
-		field := modelType.Field(i)
-		firestoreTag := field.Tag.Get("firestore")
-		jsonTag := field.Tag.Get("json")
+    tagToFieldMap := make(map[string]string)
+    for i := 0; i < modelType.NumField(); i++ {
+        field := modelType.Field(i)
 
-		if firestoreTag != "" && firestoreTag != "-" {
-			tagToFieldMap[firestoreTag] = field.Name
-		}
-		if jsonTag != "" && jsonTag != "-" {
-			tagToFieldMap[jsonTag] = field.Name
-		}
-	}
+        // strip options from firestore tag
+        rawFS := field.Tag.Get("firestore")
+        if rawFS != "" && rawFS != "-" {
+            name := strings.SplitN(rawFS, ",", 2)[0]
+            if name != "" {
+                tagToFieldMap[name] = field.Name
+            }
+        }
+
+        // strip options from json tag
+        rawJSON := field.Tag.Get("json")
+        if rawJSON != "" && rawJSON != "-" {
+            name := strings.SplitN(rawJSON, ",", 2)[0]
+            if name != "" {
+                tagToFieldMap[name] = field.Name
+            }
+        }
+    }
 
 	modelRegistry[modelName] = ModelInfo{
 		CollectionName: collectionName,
