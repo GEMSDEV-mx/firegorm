@@ -71,7 +71,12 @@ func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 	val.FieldByName("Deleted").SetBool(false)
 
 	Log(INFO, "Creating document in collection '%s': %+v", b.CollectionName, data)
+    // after you’ve set ID & timestamps but before Set(ctx,…):
+	if err := DefaultRegistry.RunHooks(ctx, b.CollectionName, PreCreate, data); err != nil {
+		return err
+	}
 	_, err := Client.Collection(b.CollectionName).Doc(b.ID).Set(ctx, data)
+	_ = DefaultRegistry.RunHooks(ctx, b.CollectionName, PostCreate, data)
 	return err
 }
 
@@ -194,19 +199,36 @@ func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]in
 	updates["updated_at"] = firestore.ServerTimestamp
 	Log(INFO, "Updating document ID '%s' in collection '%s' with updates: %+v", id, b.CollectionName, updates)
 
-	_, err := Client.Collection(b.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates))
+    // — run pre-update hooks —
+    if err := DefaultRegistry.RunHooks(ctx, b.CollectionName, PreUpdate, updates); err != nil {
+        return err
+    }
+
+    _, err := Client.Collection(b.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates))
+    // — run post-update hooks —
+    _ = DefaultRegistry.RunHooks(ctx, b.CollectionName, PostUpdate, updates)
 	return err
 }
 
 // Delete performs a soft delete by marking the document as deleted.
 func (b *BaseModel) Delete(ctx context.Context, id string) error {
+    // — run pre-delete hooks —
+    if err := DefaultRegistry.RunHooks(ctx, b.CollectionName, PreDelete, id); err != nil {
+        return err
+    }
 	now := time.Now()
 	updates := map[string]interface{}{
 		"deleted":    true,
 		"deleted_at": now,
 		"updated_at": firestore.ServerTimestamp,
 	}
-	return b.Update(ctx, id, updates)
+    // perform the soft-delete
+    err := b.Update(ctx, id, updates)
+    // — run post-delete hooks —
+    if err == nil {
+        _ = DefaultRegistry.RunHooks(ctx, b.CollectionName, PostDelete, id)
+    }
+    return err	
 }
 
 // List retrieves documents with optional filters, sorting, and pagination.

@@ -4,109 +4,102 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
-	"time"
 
 	"github.com/GEMSDEV-mx/firegorm"
 )
 
+// Task model with BaseModel embedded
+// Hooks will run around Create/Update/Delete for this model.
 type Task struct {
-	firegorm.BaseModel
-	Title       string `firestore:"title" json:"title" validate:"required"`
-	Description string `firestore:"description" json:"description" validate:"required"`
-	Done        bool   `firestore:"done" json:"done"`
+    firegorm.BaseModel
+    Title       string `firestore:"title" json:"title" validate:"required"`
+    Description string `firestore:"description" json:"description" validate:"required"`
+    Done        bool   `firestore:"done" json:"done"`
 }
 
 func main() {
-	credentials := loadCredentials()
-	if err := firegorm.Init(credentials); err != nil {
-		log.Fatalf("Failed to initialize Firegorm: %v", err)
-	}
+    // Load credentials and initialize Firegorm
+    creds := loadCredentials()
+    if err := firegorm.Init(creds); err != nil {
+        log.Fatalf("Failed to initialize Firegorm: %v", err)
+    }
 
-	// Register the Task model.
-	instance, err := firegorm.RegisterModel(&Task{}, "tasks")
-	if err != nil {
-		log.Fatalf("Failed to register model: %v", err)
-	}
-	taskModel := instance.(*Task) // Type assertion
+    // Register Task model under "tasks" collection
+    inst, err := firegorm.RegisterModel(&Task{}, "tasks")
+    if err != nil {
+        log.Fatalf("Failed to register Task model: %v", err)
+    }
+    taskModel := inst.(*Task)
+    ctx := context.Background()
 
-	ctx := context.Background()
+    // ----------------------
+    // Register Hooks
+    // ----------------------
 
-	// Create multiple tasks (e.g., 15 tasks)
-	totalTasks := 15
-	for i := 1; i <= totalTasks; i++ {
-		taskData := &Task{
-			Title:       "Task " + strconv.Itoa(i),
-			Description: fmt.Sprintf("Description for task %d", i),
-			Done:        false,
-		}
-		if err := taskModel.Create(ctx, taskData); err != nil {
-			log.Fatalf("Failed to create task %d: %v", i, err)
-		}
-		log.Printf("Created Task %d with ID: %s", i, taskData.ID)
-	}
+    // PreCreate: prefix Title
+    firegorm.DefaultRegistry.RegisterHook("tasks", firegorm.PreCreate, func(ctx context.Context, data interface{}) error {
+        t := data.(*Task)
+        t.Title = "[PRECREATE] " + t.Title
+        return nil
+    })
 
-	// Test the Count method for tasks that are not done.
-	filters := map[string]interface{}{
-		"done": false,
-	}
-	count, err := taskModel.Count(ctx, filters)
-	if err != nil {
-		log.Fatalf("Failed to count tasks: %v", err)
-	}
-	log.Printf("Counted %d tasks matching filters: %v", count, filters)
+    // PostCreate: print info
+    firegorm.DefaultRegistry.RegisterHook("tasks", firegorm.PostCreate, func(ctx context.Context, data interface{}) error {
+        t := data.(*Task)
+        fmt.Printf("PostCreate Hook fired: ID=%s, Title=%s\n", t.ID, t.Title)
+        return nil
+    })
 
-	// Test listing tasks with pagination and sorting.
-	log.Println("Testing pagination for listing tasks...")
-	var allTasks []Task
-	limit := 10
-	startAfter := ""
-	page := 1
-	// For example, sort by "created_at" in descending order.
-	sortField := "created_at"
-	sortOrder := "desc"
+    // ----------------------
+    // Create tasks with hooks enabled
+    // ----------------------
+    fmt.Println("Creating task 1 with hooks enabled...")
+    t1 := &Task{
+        Title:       "Task One",
+        Description: "First task",
+        Done:        false,
+    }
+    if err := taskModel.Create(ctx, t1); err != nil {
+        log.Fatalf("Failed to create task1: %v", err)
+    }
 
-	for {
-		var tasksPage []Task
-		nextPageToken, err := taskModel.List(ctx, filters, limit, startAfter, sortField, sortOrder, &tasksPage)
-		if err != nil {
-			log.Fatalf("Failed to list tasks on page %d: %v", page, err)
-		}
+    // ----------------------
+    // Disable PreCreate globally
+    // ----------------------
+    fmt.Println("Disabling PreCreate hooks...")
+    firegorm.DefaultRegistry.EnableType(firegorm.PreCreate, false)
 
-		log.Printf("Page %d: Retrieved %d tasks", page, len(tasksPage))
-		for _, t := range tasksPage {
-			log.Printf("Task ID: %s, Title: %s", t.ID, t.Title)
-		}
-		allTasks = append(allTasks, tasksPage...)
+    // Create another task (no prefix)
+    fmt.Println("Creating task 2 with PreCreate disabled...")
+    t2 := &Task{
+        Title:       "Task Two",
+        Description: "Second task",
+        Done:        false,
+    }
+    if err := taskModel.Create(ctx, t2); err != nil {
+        log.Fatalf("Failed to create task2: %v", err)
+    }
 
-		// If there's no next page token, we've fetched all tasks.
-		if nextPageToken == "" {
-			break
-		}
+    // ----------------------
+    // Disable all hooks for "tasks" on PostCreate only
+    // ----------------------
+    fmt.Println("Disabling PostCreate for tasks only...")
+    firegorm.DefaultRegistry.EnableScope("tasks", firegorm.PostCreate, false)
 
-		// Set token for next page and increment page count.
-		startAfter = nextPageToken
-		page++
-	}
+    // Create a third task (no prefix, no post-print)
+    fmt.Println("Creating task 3 with all hooks off for this scope...")
+    t3 := &Task{
+        Title:       "Task Three",
+        Description: "Third task",
+        Done:        false,
+    }
+    if err := taskModel.Create(ctx, t3); err != nil {
+        log.Fatalf("Failed to create task3: %v", err)
+    }
 
-	log.Printf("Total tasks retrieved via pagination: %d", len(allTasks))
-
-	// -------------------------------
-	// New: Test filtering by created_at date using operator notation.
-	// -------------------------------
-	log.Println("Testing date filtering with created_at__gte filter...")
-	// Get today's date in the format "2006-01-02"
-	todayStr := time.Now().Format("2006-01-02")
-	dateFilters := map[string]interface{}{
-		"created_at__gte": todayStr,
-	}
-	var dateFilteredTasks []Task
-	_, err = taskModel.List(ctx, dateFilters, 20, "", "created_at", "desc", &dateFilteredTasks)
-	if err != nil {
-		log.Fatalf("Failed to list tasks by date filter: %v", err)
-	}
-	log.Printf("Retrieved %d tasks with created_at >= %s", len(dateFilteredTasks), todayStr)
-	for _, t := range dateFilteredTasks {
-		log.Printf("Task ID: %s, Title: %s, CreatedAt: %v", t.ID, t.Title, t.CreatedAt)
-	}
+    // ----------------------
+    // Summary of created IDs
+    // ----------------------
+    fmt.Printf("Tasks created: IDs = [%s, %s, %s]\n", t1.ID, t2.ID, t3.ID)
 }
+
