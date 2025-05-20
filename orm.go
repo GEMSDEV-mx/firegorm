@@ -190,6 +190,10 @@ func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]in
 		return err
 	}
 
+	// --- remove immutable fields if they came in the payload ---
+	delete(updates, "id")
+	delete(updates, "created_at")	
+
 	// Validate updates using the registry
 	if err := validateUpdateFields(updates, b); err != nil {
 		Log(ERROR, "Update failed: %v", err)
