@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -469,33 +470,44 @@ func applyOperatorFilters(query firestore.Query, filters map[string]interface{})
     return query, nil
 }
 
+func parseValue(raw string) interface{} {
+	if i, err := strconv.ParseInt(raw, 10, 64); err == nil {
+	  return i
+	}
+	if f, err := strconv.ParseFloat(raw, 64); err == nil {
+	  return f
+	}
+	if b, err := strconv.ParseBool(raw); err == nil {
+	  return b
+	}
+	if t, err := time.Parse("2006-01-02", raw); err == nil {
+	  return t
+	}
+	return raw
+  }
+
 // parseFilter extracts the field name, operator, and new value from a filter key/value.
 // If no operator suffix is provided and the value is a slice, it sets the operator to "in".
-func parseFilter(key string, value interface{}) (field string, op string, newValue interface{}, err error) {
-    // Simple filter case: no "__" in key.
+func parseFilter(key string, value interface{}) (field, op string, newValue interface{}, err error) {
+    // --- simple case: no "__" in the key ---
     if !strings.Contains(key, "__") {
         field = key
         v := reflect.ValueOf(value)
         if v.Kind() == reflect.Slice {
             op = "in"
             newValue = value
-            return field, op, newValue, nil
+            return
         }
         op = "=="
-        // For simple filters, try date parsing but do not return error if it fails.
-        if dateStr, ok := value.(string); ok {
-            if parsedDate, err := time.Parse("2006-01-02", dateStr); err == nil {
-                newValue = parsedDate
-            } else {
-                newValue = value
-            }
+        if str, ok := value.(string); ok {
+            newValue = parseValue(str)
         } else {
             newValue = value
         }
-        return field, op, newValue, nil
+        return
     }
 
-    // Operator filter case: key contains "__".
+    // --- operator case: split on "__" ---
     parts := strings.SplitN(key, "__", 2)
     field = parts[0]
     switch parts[1] {
@@ -510,15 +522,28 @@ func parseFilter(key string, value interface{}) (field string, op string, newVal
     default:
         op = "=="
     }
-    // For operator filters, if the value is a string, try to parse it as a date.
-    if dateStr, ok := value.(string); ok {
-        parsedDate, err := time.Parse("2006-01-02", dateStr)
-        if err != nil {
-            return "", "", nil, fmt.Errorf("invalid date format for %s: %v", key, err)
+
+    // Now: if it's a string, try full parseValue and fall back to strict YYYY-MM-DD date
+    if str, ok := value.(string); ok {
+        // first pass: numeric / bool / RFC3339
+        parsed := parseValue(str)
+        switch parsed.(type) {
+        case int64, float64, bool, time.Time:
+            newValue = parsed
+            return field, op, newValue, nil
         }
-        newValue = parsedDate
-    } else {
-        newValue = value
+
+        // second pass: legacy date-only
+        if dt, err2 := time.Parse("2006-01-02", str); err2 == nil {
+            newValue = dt
+            return field, op, newValue, nil
+        }
+
+        // truly invalid date for an operator filter:
+        return "", "", nil, fmt.Errorf("invalid date format for %s: %q", key, str)
     }
+
+    // non-string values pass straight through
+    newValue = value
     return field, op, newValue, nil
 }
