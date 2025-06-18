@@ -475,6 +475,10 @@ func applyOperatorFilters(query firestore.Query, filters map[string]interface{})
 }
 
 func parseValue(raw string) interface{} {
+    // first try full timestamp
+    if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+        return t
+    }	
 	if i, err := strconv.ParseInt(raw, 10, 64); err == nil {
 	  return i
 	}
