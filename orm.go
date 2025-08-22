@@ -72,7 +72,7 @@ func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 	val.FieldByName("Deleted").SetBool(false)
 
 	Log(INFO, "Creating document in collection '%s': %+v", b.CollectionName, data)
-    // after you’ve set ID & timestamps but before Set(ctx,…):
+	// after you’ve set ID & timestamps but before Set(ctx,…):
 	if err := DefaultRegistry.RunHooks(ctx, b.CollectionName, PreCreate, data); err != nil {
 		return err
 	}
@@ -91,6 +91,12 @@ func (b *BaseModel) Get(ctx context.Context, id string, model interface{}) error
 	doc, err := Client.Collection(b.CollectionName).Doc(id).Get(ctx)
 	if err != nil {
 		Log(ERROR, "Failed to fetch document with ID '%s' from collection '%s': %v", id, b.CollectionName, err)
+		return err
+	}
+
+	if deleted, ok := doc.Data()["deleted"].(bool); ok && deleted {
+		err := fmt.Errorf("document with ID '%s' has been deleted", id)
+		Log(WARN, "Get failed: %v", err)
 		return err
 	}
 
@@ -192,7 +198,7 @@ func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]in
 
 	// --- remove immutable fields if they came in the payload ---
 	delete(updates, "id")
-	delete(updates, "created_at")	
+	delete(updates, "created_at")
 
 	// Validate updates using the registry
 	if err := validateUpdateFields(updates, b); err != nil {
@@ -204,159 +210,164 @@ func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]in
 	updates["updated_at"] = firestore.ServerTimestamp
 	Log(INFO, "Updating document ID '%s' in collection '%s' with updates: %+v", id, b.CollectionName, updates)
 
-    // — run pre-update hooks —
-    if err := DefaultRegistry.RunHooks(ctx, b.CollectionName, PreUpdate, updates); err != nil {
-        return err
-    }
+	// — run pre-update hooks —
+	if err := DefaultRegistry.RunHooks(ctx, b.CollectionName, PreUpdate, updates); err != nil {
+		return err
+	}
 
-    _, err := Client.Collection(b.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates))
-    // — run post-update hooks —
-    _ = DefaultRegistry.RunHooks(ctx, b.CollectionName, PostUpdate, updates)
+	_, err := Client.Collection(b.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates))
+	// — run post-update hooks —
+	_ = DefaultRegistry.RunHooks(ctx, b.CollectionName, PostUpdate, updates)
 	return err
 }
 
 // Delete performs a soft delete by marking the document as deleted.
 func (b *BaseModel) Delete(ctx context.Context, id string) error {
-    // — run pre-delete hooks —
-    if err := DefaultRegistry.RunHooks(ctx, b.CollectionName, PreDelete, id); err != nil {
-        return err
-    }
+	// — run pre-delete hooks —
+	if err := DefaultRegistry.RunHooks(ctx, b.CollectionName, PreDelete, id); err != nil {
+		return err
+	}
 	now := time.Now()
 	updates := map[string]interface{}{
 		"deleted":    true,
 		"deleted_at": now,
 		"updated_at": firestore.ServerTimestamp,
 	}
-    // perform the soft-delete
-    err := b.Update(ctx, id, updates)
-    // — run post-delete hooks —
-    if err == nil {
-        _ = DefaultRegistry.RunHooks(ctx, b.CollectionName, PostDelete, id)
-    }
-    return err	
+	// perform the soft-delete
+	err := b.Update(ctx, id, updates)
+	// — run post-delete hooks —
+	if err == nil {
+		_ = DefaultRegistry.RunHooks(ctx, b.CollectionName, PostDelete, id)
+	}
+	return err
 }
 
 // List retrieves documents with optional filters, sorting, and pagination.
 func (b *BaseModel) List(ctx context.Context, filters map[string]interface{}, limit int, startAfter string, sortField string, sortOrder string, results interface{}) (string, error) {
-    if err := b.EnsureCollection(); err != nil {
-        Log(ERROR, "List failed: %v", err)
-        return "", err
-    }
+	if err := b.EnsureCollection(); err != nil {
+		Log(ERROR, "List failed: %v", err)
+		return "", err
+	}
 
-    // Start with the query: only non-deleted documents.
-    query := Client.Collection(b.CollectionName).Where("deleted", "==", false)
-    
-    // Apply operator filters (supports __gt, __gte, __lt, __lte for any field, including custom date fields)
-    var err error
-    query, err = applyOperatorFilters(query, filters)
-    if err != nil {
-        Log(ERROR, "List failed when applying filters: %v", err)
-        return "", err
-    }
+	// Start with the query: only non-deleted documents.
+	query := Client.Collection(b.CollectionName).Where("deleted", "==", false)
 
-    // Apply sorting if sortField is provided.
-    if sortField != "" {
-        if sortOrder == "asc" {
-            query = query.OrderBy(sortField, firestore.Asc)
-        } else if sortOrder == "desc" {
-            query = query.OrderBy(sortField, firestore.Desc)
-        } else {
-            err := fmt.Errorf("invalid sortOrder: %s. Must be 'asc' or 'desc'", sortOrder)
-            Log(ERROR, "List failed: %v", err)
-            return "", err
-        }
-    }
+	// Apply operator filters (supports __gt, __gte, __lt, __lte for any field, including custom date fields)
+	var err error
+	query, err = applyOperatorFilters(query, filters)
+	if err != nil {
+		Log(ERROR, "List failed when applying filters: %v", err)
+		return "", err
+	}
 
-    // If a startAfter token is provided, use it for pagination.
-    if startAfter != "" {
-        doc, err := Client.Collection(b.CollectionName).Doc(startAfter).Get(ctx)
-        if err != nil {
-            err = fmt.Errorf("invalid startAfter token: %v", err)
-            Log(ERROR, "List failed: %v", err)
-            return "", err
-        }
-        query = query.StartAfter(doc)
-    }
+	// Apply sorting if sortField is provided.
+	if sortField != "" {
+		if sortOrder == "asc" {
+			query = query.OrderBy(sortField, firestore.Asc)
+		} else if sortOrder == "desc" {
+			query = query.OrderBy(sortField, firestore.Desc)
+		} else {
+			err := fmt.Errorf("invalid sortOrder: %s. Must be 'asc' or 'desc'", sortOrder)
+			Log(ERROR, "List failed: %v", err)
+			return "", err
+		}
+	}
 
-    // Only apply limit if it's greater than zero.
-    if limit > 0 {
-        query = query.Limit(limit)
-    }
+	// If a startAfter token is provided, use it for pagination.
+	if startAfter != "" {
+		doc, err := Client.Collection(b.CollectionName).Doc(startAfter).Get(ctx)
+		if err != nil {
+			err = fmt.Errorf("invalid startAfter token: %v", err)
+			Log(ERROR, "List failed: %v", err)
+			return "", err
+		}
+		if deleted, ok := doc.Data()["deleted"].(bool); ok && deleted {
+			err = fmt.Errorf("invalid startAfter token: document '%s' is deleted", startAfter)
+			Log(ERROR, "List failed: %v", err)
+			return "", err
+		}
+		query = query.StartAfter(doc)
+	}
 
-    iter := query.Documents(ctx)
-    defer iter.Stop()
+	// Only apply limit if it's greater than zero.
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
 
-    resultsVal := reflect.ValueOf(results).Elem()
-    itemType := resultsVal.Type().Elem()
+	iter := query.Documents(ctx)
+	defer iter.Stop()
 
-    for {
-        doc, err := iter.Next()
-        if err == iterator.Done {
-            break
-        }
-        if err != nil {
-            Log(ERROR, "Failed to iterate documents: %v", err)
-            return "", fmt.Errorf("failed to iterate documents: %v", err)
-        }
+	resultsVal := reflect.ValueOf(results).Elem()
+	itemType := resultsVal.Type().Elem()
 
-        // Create a new item and map Firestore document data to it.
-        item := reflect.New(itemType).Interface()
-        if err := doc.DataTo(item); err != nil {
-            Log(ERROR, "Failed to map document data: %v", err)
-            return "", fmt.Errorf("failed to map document data: %v", err)
-        }
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			Log(ERROR, "Failed to iterate documents: %v", err)
+			return "", fmt.Errorf("failed to iterate documents: %v", err)
+		}
 
-        // If the slice holds non-pointer values, dereference the item before appending.
-        if itemType.Kind() != reflect.Ptr {
-            item = reflect.ValueOf(item).Elem().Interface()
-        }
+		// Create a new item and map Firestore document data to it.
+		item := reflect.New(itemType).Interface()
+		if err := doc.DataTo(item); err != nil {
+			Log(ERROR, "Failed to map document data: %v", err)
+			return "", fmt.Errorf("failed to map document data: %v", err)
+		}
 
-        resultsVal.Set(reflect.Append(resultsVal, reflect.ValueOf(item)))
-    }
+		// If the slice holds non-pointer values, dereference the item before appending.
+		if itemType.Kind() != reflect.Ptr {
+			item = reflect.ValueOf(item).Elem().Interface()
+		}
 
-    nextPageToken := ""
-    // Only set nextPageToken if a limit was applied.
-    if limit > 0 && resultsVal.Len() == limit {
-        lastItem := resultsVal.Index(resultsVal.Len() - 1).Interface()
-        nextPageToken = reflect.ValueOf(lastItem).FieldByName("ID").String()
-    }
+		resultsVal.Set(reflect.Append(resultsVal, reflect.ValueOf(item)))
+	}
 
-    Log(INFO, "Listed documents from collection '%s': %+v", b.CollectionName, results)
-    return nextPageToken, nil
+	nextPageToken := ""
+	// Only set nextPageToken if a limit was applied.
+	if limit > 0 && resultsVal.Len() == limit {
+		lastItem := resultsVal.Index(resultsVal.Len() - 1).Interface()
+		nextPageToken = reflect.ValueOf(lastItem).FieldByName("ID").String()
+	}
+
+	Log(INFO, "Listed documents from collection '%s': %+v", b.CollectionName, results)
+	return nextPageToken, nil
 }
 
 func (b *BaseModel) Last(ctx context.Context, model interface{}) error {
-    if err := b.EnsureCollection(); err != nil {
-        Log(ERROR, "Last failed: %v", err)
-        return err
-    }
+	if err := b.EnsureCollection(); err != nil {
+		Log(ERROR, "Last failed: %v", err)
+		return err
+	}
 
-    // Query for documents that are not deleted, ordered by creation time descending.
-    query := Client.Collection(b.CollectionName).
-        Where("deleted", "==", false).
-        OrderBy("created_at", firestore.Desc).
-        Limit(1)
+	// Query for documents that are not deleted, ordered by creation time descending.
+	query := Client.Collection(b.CollectionName).
+		Where("deleted", "==", false).
+		OrderBy("created_at", firestore.Desc).
+		Limit(1)
 
-    iter := query.Documents(ctx)
-    defer iter.Stop()
+	iter := query.Documents(ctx)
+	defer iter.Stop()
 
-    doc, err := iter.Next()
-    if err == iterator.Done {
-        Log(WARN, "No records found in collection '%s'", b.CollectionName)
-        return errors.New("no records found")
-    }
-    if err != nil {
-        Log(ERROR, "Error fetching last record: %v", err)
-        return err
-    }
+	doc, err := iter.Next()
+	if err == iterator.Done {
+		Log(WARN, "No records found in collection '%s'", b.CollectionName)
+		return errors.New("no records found")
+	}
+	if err != nil {
+		Log(ERROR, "Error fetching last record: %v", err)
+		return err
+	}
 
-    if err := doc.DataTo(model); err != nil {
-        Log(ERROR, "Error mapping document data to model: %v", err)
-        return err
-    }
+	if err := doc.DataTo(model); err != nil {
+		Log(ERROR, "Error mapping document data to model: %v", err)
+		return err
+	}
 
-    Log(INFO, "Fetched last record from collection '%s': %+v", b.CollectionName, model)
-    return nil
+	Log(INFO, "Fetched last record from collection '%s': %+v", b.CollectionName, model)
+	return nil
 }
 
 // Count retrieves the number of documents in the collection that match the provided filters.
@@ -413,7 +424,6 @@ func (b *BaseModel) setTimestamps() {
 	Log(DEBUG, "Set timestamps: CreatedAt=%v, UpdatedAt=%v", b.CreatedAt, b.UpdatedAt)
 }
 
-
 // validateUpdateFields validates the fields being updated based on the struct's tags.
 func validateUpdateFields(updates map[string]interface{}, baseModel *BaseModel) error {
 	collectionName := baseModel.CollectionName
@@ -464,94 +474,94 @@ func validateUpdateFields(updates map[string]interface{}, baseModel *BaseModel) 
 // applyOperatorFilters applies filters that use an operator notation (e.g., "__gt", "__lte").
 // If a filter value is a string, it attempts to parse it as a date using the "2006-01-02" layout.
 func applyOperatorFilters(query firestore.Query, filters map[string]interface{}) (firestore.Query, error) {
-    for key, value := range filters {
-        field, op, newValue, err := parseFilter(key, value)
-        if err != nil {
-            return query, err
-        }
-        query = query.Where(field, op, newValue)
-    }
-    return query, nil
+	for key, value := range filters {
+		field, op, newValue, err := parseFilter(key, value)
+		if err != nil {
+			return query, err
+		}
+		query = query.Where(field, op, newValue)
+	}
+	return query, nil
 }
 
 func parseValue(raw string) interface{} {
-    // first try full timestamp
-    if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-        return t
-    }	
+	// first try full timestamp
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t
+	}
 	if i, err := strconv.ParseInt(raw, 10, 64); err == nil {
-	  return i
+		return i
 	}
 	if f, err := strconv.ParseFloat(raw, 64); err == nil {
-	  return f
+		return f
 	}
 	if b, err := strconv.ParseBool(raw); err == nil {
-	  return b
+		return b
 	}
 	if t, err := time.Parse("2006-01-02", raw); err == nil {
-	  return t
+		return t
 	}
 	return raw
-  }
+}
 
 // parseFilter extracts the field name, operator, and new value from a filter key/value.
 // If no operator suffix is provided and the value is a slice, it sets the operator to "in".
 func parseFilter(key string, value interface{}) (field, op string, newValue interface{}, err error) {
-    // --- simple case: no "__" in the key ---
-    if !strings.Contains(key, "__") {
-        field = key
-        v := reflect.ValueOf(value)
-        if v.Kind() == reflect.Slice {
-            op = "in"
-            newValue = value
-            return
-        }
-        op = "=="
-        if str, ok := value.(string); ok {
-            newValue = parseValue(str)
-        } else {
-            newValue = value
-        }
-        return
-    }
+	// --- simple case: no "__" in the key ---
+	if !strings.Contains(key, "__") {
+		field = key
+		v := reflect.ValueOf(value)
+		if v.Kind() == reflect.Slice {
+			op = "in"
+			newValue = value
+			return
+		}
+		op = "=="
+		if str, ok := value.(string); ok {
+			newValue = parseValue(str)
+		} else {
+			newValue = value
+		}
+		return
+	}
 
-    // --- operator case: split on "__" ---
-    parts := strings.SplitN(key, "__", 2)
-    field = parts[0]
-    switch parts[1] {
-    case "gt":
-        op = ">"
-    case "gte":
-        op = ">="
-    case "lt":
-        op = "<"
-    case "lte":
-        op = "<="
-    default:
-        op = "=="
-    }
+	// --- operator case: split on "__" ---
+	parts := strings.SplitN(key, "__", 2)
+	field = parts[0]
+	switch parts[1] {
+	case "gt":
+		op = ">"
+	case "gte":
+		op = ">="
+	case "lt":
+		op = "<"
+	case "lte":
+		op = "<="
+	default:
+		op = "=="
+	}
 
-    // Now: if it's a string, try full parseValue and fall back to strict YYYY-MM-DD date
-    if str, ok := value.(string); ok {
-        // first pass: numeric / bool / RFC3339
-        parsed := parseValue(str)
-        switch parsed.(type) {
-        case int64, float64, bool, time.Time:
-            newValue = parsed
-            return field, op, newValue, nil
-        }
+	// Now: if it's a string, try full parseValue and fall back to strict YYYY-MM-DD date
+	if str, ok := value.(string); ok {
+		// first pass: numeric / bool / RFC3339
+		parsed := parseValue(str)
+		switch parsed.(type) {
+		case int64, float64, bool, time.Time:
+			newValue = parsed
+			return field, op, newValue, nil
+		}
 
-        // second pass: legacy date-only
-        if dt, err2 := time.Parse("2006-01-02", str); err2 == nil {
-            newValue = dt
-            return field, op, newValue, nil
-        }
+		// second pass: legacy date-only
+		if dt, err2 := time.Parse("2006-01-02", str); err2 == nil {
+			newValue = dt
+			return field, op, newValue, nil
+		}
 
-        // truly invalid date for an operator filter:
-        return "", "", nil, fmt.Errorf("invalid date format for %s: %q", key, str)
-    }
+		// truly invalid date for an operator filter:
+		return "", "", nil, fmt.Errorf("invalid date format for %s: %q", key, str)
+	}
 
-    // non-string values pass straight through
-    newValue = value
-    return field, op, newValue, nil
+	// non-string values pass straight through
+	newValue = value
+	return field, op, newValue, nil
 }
