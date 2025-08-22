@@ -71,8 +71,6 @@ func TestUpdatesToFirestoreUpdates(t *testing.T) {
 	}
 }
 
-
-
 func TestParseFilter_Date(t *testing.T) {
 	field, op, newVal, err := parseFilter("event_date__gte", "2025-04-01")
 	if err != nil {
@@ -87,6 +85,27 @@ func TestParseFilter_Date(t *testing.T) {
 	expectedTime, _ := time.Parse("2006-01-02", "2025-04-01")
 	if !reflect.DeepEqual(newVal, expectedTime) {
 		t.Errorf("expected value %v, got %v", expectedTime, newVal)
+	}
+}
+
+func TestParseFilter_DateLte(t *testing.T) {
+	field, op, newVal, err := parseFilter("event_date__lte", "2025-04-01")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if field != "event_date" {
+		t.Fatalf("expected field 'event_date', got '%s'", field)
+	}
+	if op != "<=" {
+		t.Fatalf("expected operator '<=', got '%s'", op)
+	}
+	expected := time.Date(2025, 4, 1, 23, 59, 59, int(time.Second-time.Nanosecond), time.UTC)
+	tVal, ok := newVal.(time.Time)
+	if !ok {
+		t.Fatalf("expected time.Time, got %T", newVal)
+	}
+	if !tVal.Equal(expected) {
+		t.Fatalf("expected %v, got %v", expected, tVal)
 	}
 }
 
@@ -126,7 +145,7 @@ type DummyModel struct {
 func TestValidateUpdateFields_Success(t *testing.T) {
 	// Clear registry to ensure isolation
 	modelRegistry = make(map[string]ModelInfo)
-	
+
 	dummy := DummyModel{}
 	// Register the dummy model.
 	_, err := RegisterModel(&dummy, "dummy")
@@ -148,7 +167,7 @@ func TestValidateUpdateFields_Success(t *testing.T) {
 func TestValidateUpdateFields_Failure(t *testing.T) {
 	// Clear registry to ensure isolation
 	modelRegistry = make(map[string]ModelInfo)
-	
+
 	dummy := DummyModel{}
 	// Register the dummy model.
 	_, err := RegisterModel(&dummy, "dummy")
