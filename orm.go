@@ -545,14 +545,34 @@ func parseFilter(key string, value interface{}) (field, op string, newValue inte
 	if str, ok := value.(string); ok {
 		// first pass: numeric / bool / RFC3339
 		parsed := parseValue(str)
-		switch parsed.(type) {
-		case int64, float64, bool, time.Time:
+		switch v := parsed.(type) {
+		case time.Time:
+			if len(str) == len("2006-01-02") {
+				// For date-only values with range operators, adjust
+				// the time component so filters like __lte include
+				// the entire day instead of midnight only.
+				switch op {
+				case "<=":
+					v = v.Add(24*time.Hour - time.Nanosecond)
+				case "<":
+					v = v.Add(24 * time.Hour)
+				}
+			}
+			newValue = v
+			return field, op, newValue, nil
+		case int64, float64, bool:
 			newValue = parsed
 			return field, op, newValue, nil
 		}
 
 		// second pass: legacy date-only
 		if dt, err2 := time.Parse("2006-01-02", str); err2 == nil {
+			switch op {
+			case "<=":
+				dt = dt.Add(24*time.Hour - time.Nanosecond)
+			case "<":
+				dt = dt.Add(24 * time.Hour)
+			}
 			newValue = dt
 			return field, op, newValue, nil
 		}
