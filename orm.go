@@ -76,9 +76,10 @@ func (b *BaseModel) Create(ctx context.Context, data interface{}) error {
 	if err := DefaultRegistry.RunHooks(ctx, b.CollectionName, PreCreate, data); err != nil {
 		return err
 	}
-	_, err := Client.Collection(b.CollectionName).Doc(b.ID).Set(ctx, data)
-	_ = DefaultRegistry.RunHooks(ctx, b.CollectionName, PostCreate, data)
-	return err
+	if _, err := Client.Collection(b.CollectionName).Doc(b.ID).Set(ctx, data); err != nil {
+		return err
+	}
+	return DefaultRegistry.RunHooks(ctx, b.CollectionName, PostCreate, data)
 }
 
 // Get retrieves a document by ID and maps it to the provided model.
@@ -145,7 +146,6 @@ func (b *BaseModel) FindOneBy(ctx context.Context, property string, value interf
 	return nil
 }
 
-// FindOne retrieves a single document from the collection that matches the given filters.
 // FindOne retrieves a single document from the collection that matches the given filters.
 func (b *BaseModel) FindOne(ctx context.Context, filters map[string]interface{}, model interface{}) error {
 	if err := b.EnsureCollection(); err != nil {
@@ -215,10 +215,11 @@ func (b *BaseModel) Update(ctx context.Context, id string, updates map[string]in
 		return err
 	}
 
-	_, err := Client.Collection(b.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates))
+	if _, err := Client.Collection(b.CollectionName).Doc(id).Update(ctx, updatesToFirestoreUpdates(updates)); err != nil {
+		return err
+	}
 	// — run post-update hooks —
-	_ = DefaultRegistry.RunHooks(ctx, b.CollectionName, PostUpdate, updates)
-	return err
+	return DefaultRegistry.RunHooks(ctx, b.CollectionName, PostUpdate, updates)
 }
 
 // Delete performs a soft delete by marking the document as deleted.

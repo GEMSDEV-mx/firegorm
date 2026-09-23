@@ -17,8 +17,8 @@ const (
 )
 
 // logger is the global logger instance.
-var logger *log.Logger
-var logLevel LogLevel
+var logger = log.New(os.Stdout, "[Firegorm] ", log.LstdFlags)
+var logLevel = INFO
 
 // SetLogLevel configures the logging level for Firegorm.
 func SetLogLevel(level string) {

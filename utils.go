@@ -32,25 +32,25 @@ func updatesToFirestoreUpdates(updates map[string]interface{}) []firestore.Updat
 // Any parameter value that contains a comma is split into a []string.
 // The caller can pass a slice of keys to exclude from processing.
 func ExtractFilters(params map[string]string, exclude []string) map[string]interface{} {
-    filters := make(map[string]interface{})
-    // Build an exclusion lookup.
-    excludeMap := make(map[string]bool)
-    for _, key := range exclude {
-        excludeMap[key] = true
-    }
-    for key, value := range params {
-        if excludeMap[key] {
-            continue
-        }
-        if strings.Contains(value, ",") {
-            parts := strings.Split(value, ",")
-            for i, part := range parts {
-                parts[i] = strings.TrimSpace(part)
-            }
-            filters[key] = parts
-        } else {
-            filters[key] = value
-        }
-    }
-    return filters
+	filters := make(map[string]interface{})
+	// Build an exclusion lookup.
+	excludeMap := make(map[string]bool)
+	for _, key := range exclude {
+		excludeMap[key] = true
+	}
+	for key, value := range params {
+		if excludeMap[key] {
+			continue
+		}
+		if strings.Contains(value, ",") {
+			parts := strings.Split(value, ",")
+			for i, part := range parts {
+				parts[i] = strings.TrimSpace(part)
+			}
+			filters[key] = parts
+		} else {
+			filters[key] = value
+		}
+	}
+	return filters
 }

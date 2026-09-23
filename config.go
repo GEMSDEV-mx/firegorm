@@ -13,9 +13,13 @@ var Client *firestore.Client
 // Init initializes the Firestore client and logger.
 // The credentials should be passed as a JSON string.
 func Init(credentialsJSON string) error {
+	return InitWithContext(context.Background(), credentialsJSON)
+}
+
+// InitWithContext initializes the Firestore client using the supplied context.
+func InitWithContext(ctx context.Context, credentialsJSON string) error {
 	InitializeLogger() // Set up logging
 
-	ctx := context.Background()
 	sa := option.WithCredentialsJSON([]byte(credentialsJSON))
 
 	app, err := firebase.NewApp(ctx, nil, sa)
@@ -32,4 +36,15 @@ func Init(credentialsJSON string) error {
 
 	Log(INFO, "Firestore client successfully initialized")
 	return nil
+}
+
+// Close releases resources held by the Firestore client. It is safe to call
+// when Firegorm has not been initialized.
+func Close() error {
+	if Client == nil {
+		return nil
+	}
+	err := Client.Close()
+	Client = nil
+	return err
 }
